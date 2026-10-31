@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f4c5c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="יומן אימונים">
+<title>יומן אימונים</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-title" id="topTitle">יומן אימונים</div>
+  <div class="topbar-sub" id="topSub"></div>
+</header>
+
+<main id="main" aria-live="polite">
+  <div class="loading">טוען…</div>
+</main>
+
+<nav class="bottomnav" id="nav" aria-label="ניווט ראשי">
+  <a href="#home" data-view="home"><span class="ico">⌂</span><span>בית</span></a>
+  <a href="#list" data-view="list"><span class="ico">☰</span><span>אימונים</span></a>
+  <a href="#add" data-view="add" class="nav-add"><span class="ico">＋</span><span>הוספה</span></a>
+  <a href="#reports" data-view="reports"><span class="ico">▤</span><span>דוחות</span></a>
+  <a href="#manage" data-view="manage"><span class="ico">⚙</span><span>ניהול</span></a>
+</nav>
+
+<div id="modalRoot"></div>
+<div id="toast" class="toast" role="status"></div>
+
+<noscript>יש להפעיל JavaScript כדי להשתמש באפליקציה.</noscript>
+<script type="module" src="app.js"></script>
+</body>
+</html>
