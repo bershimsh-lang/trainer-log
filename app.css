@@ -226,3 +226,8 @@ main { max-width: 640px; margin: 0 auto; padding: 14px 14px 0; }
 .wa-check .box { width: 24px; height: 24px; border-radius: 7px; border: 2px solid #9ca3af; display: grid; place-items: center; color: #fff; font-size: 15px; }
 .wa-prov.on .wa-check .box { background: #1fa855; border-color: #1fa855; }
 .wa-text { font-family: inherit; min-height: 220px; font-size: 15px; line-height: 1.5; resize: vertical; white-space: pre-wrap; }
+
+/* ---------- reminder ---------- */
+.banner.remind { background: var(--primary-soft); border-color: #a7d7cf; }
+.chips.grid7 { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.chips.grid7 .chip { padding: 10px 0; text-align: center; }

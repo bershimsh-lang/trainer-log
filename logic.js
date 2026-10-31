@@ -307,20 +307,17 @@ export function substitutionLines(subWorkouts) {
   });
 }
 
-// קו מפריד קצר מספיק כדי לא לשבור שורה בבועת וואטסאפ בטלפון צר
-export const WA_SEPARATOR = '━'.repeat(12);
-
 const totalPhrase = (n) => (n === 1 ? 'שיעור אחד' : `${n} שיעורים`);
 
 /**
- * בונה הודעת טקסט לוואטסאפ.
- * selections: [{ providerId, typeIds: [...] }] – רק סוגי האימונים שנבחרו נכללים.
- * לכל סוג: פירוט לפי תאריך + סה"כ מודגש. החלפות כהערות (*) אחרי הספק. בסוף – סיכום כללי.
- * שימוש בסימוני וואטסאפ: *טקסט* = מודגש.
+ * בונה הודעת טקסט לוואטסאפ, בעיצוב נקי שוואטסאפ יודע להציג:
+ *  *טקסט* מודגש · _טקסט_ נטוי. תבליטים כתווים רגילים (• ◦) כדי שייראו זהה בכל גרסת וואטסאפ.
+ * לכל ספק: פירוט לפי סוג ותאריך + סה"כ מודגש; החלפות בבלוק ציטוט נפרד (לא נספרות בסה"כ).
+ * selections: [{ providerId, typeIds: [...] }]
  */
 export function buildWhatsAppText({ providers, types, workouts }, month, selections) {
   const [y, m] = month.split('-');
-  const out = [`פירוט שיעורים לחודש ${MONTHS[Number(m) - 1]} ${y.slice(2)}`];
+  const out = [`*פירוט שיעורים – ${MONTHS[Number(m) - 1]} ${y.slice(2)}*`];
   let totalSelf = 0;
   let totalSubs = 0;
   for (const sel of selections) {
@@ -334,24 +331,64 @@ export function buildWhatsAppText({ providers, types, workouts }, month, selecti
     totalSelf += self.length;
     totalSubs += subs.length;
 
-    out.push('', `*${provider.name}*`);
-    // סדר הסוגים לפי הופעה ראשונה בחודש
+    out.push('', `🏢 *${provider.name}*`);
     const typeOrder = [...new Set(self.map((w) => w.workout_type_id))];
     for (const tid of typeOrder) {
       const name = types.find((t) => t.id === tid)?.name ?? 'אחר';
-      const perDate = new Map();
       const ofType = self.filter((x) => x.workout_type_id === tid);
+      const perDate = new Map();
       for (const w of ofType) perDate.set(w.workout_date, (perDate.get(w.workout_date) || 0) + 1);
       out.push('', `${name}:`);
-      for (const [date, n] of perDate) out.push(`${shortDate(date)} ${lessonsPhrase(n)}`);
+      for (const [date, n] of perDate) out.push(`• ${shortDate(date)} ${lessonsPhrase(n)}`);
       out.push(`*סה"כ ${name}: ${totalPhrase(ofType.length)}*`);
     }
     if (typeOrder.length > 1) out.push('', `*סה"כ ${provider.name}: ${totalPhrase(self.length)}*`);
-    const lines = substitutionLines(subs);
-    if (lines.length) out.push('', ...lines.map((l) => `*${l}`));
+
+    if (subs.length) {
+      // שורה לכל תאריך + מחליפה, בסדר כרונולוגי
+      const rows = new Map();
+      for (const w of subs) {
+        const key = `${w.workout_date}|${(w.substitute_name || '').trim()}`;
+        rows.set(key, (rows.get(key) || 0) + 1);
+      }
+      out.push('', '_החלפות:_');
+      for (const [key, n] of rows) {
+        const [date, name] = key.split('|');
+        out.push(`◦ ${shortDate(date)} ${name} – ${lessonsPhrase(n)}`);
+      }
+    }
   }
-  out.push('', WA_SEPARATOR, '*סיכום:*', `סה"כ שיעורים שלי: *${totalSelf}*`, `סה"כ שיעורי מחליפות: *${totalSubs}*`);
+  out.push('', '📊 *סיכום*',
+    `• שיעורים שלי: *${totalSelf}*`,
+    `• שיעורי מחליפות: *${totalSubs}*`,
+    `• סה"כ שיעורים שהתקיימו: *${totalSelf + totalSubs}*`);
   return out.join('\n');
+}
+
+// ---------- תזכורת יומית ----------
+export const DEFAULT_REMINDER = { enabled: true, time: '17:00', days: [0, 1, 2, 3, 4, 5, 6] };
+
+/** האם להציג היום תזכורת: אחרי השעה שנקבעה, ביום פעיל, ולא הוצגה עדיין היום (גם אם כבר נרשמו אימונים). */
+export function reminderDue(meta, now = new Date()) {
+  if (!meta.onboarded || meta.reminderEnabled === false) return false;
+  const time = meta.reminderTime || DEFAULT_REMINDER.time;
+  const days = meta.reminderDays || DEFAULT_REMINDER.days;
+  const today = todayISO(now);
+  if (!days.includes(now.getDay())) return false;
+  if (`${pad(now.getHours())}:${pad(now.getMinutes())}` < time) return false;
+  return meta.lastReminderDate !== today;
+}
+
+export function reminderTitle(name) {
+  const first = (name || '').trim().split(/\s+/)[0];
+  return `היי${first ? ` ${first}` : ''}, האם הכנסת את כל האימונים של היום?`;
+}
+
+/** "נרשמו היום 2 אימונים (08:00, 12:00)" – השעות עוזרות לזהות מיד אימון שחסר. */
+export function todayLoggedText(workouts, now = new Date()) {
+  const times = workouts.filter((w) => w.workout_date === todayISO(now)).map((w) => w.start_time).sort();
+  if (times.length === 0) return 'עוד לא נרשמו אימונים היום';
+  return `${times.length === 1 ? 'נרשם היום אימון אחד' : `נרשמו היום ${times.length} אימונים`} (${times.join(', ')})`;
 }
 
 /** תיבת שם קובץ בטוחה (שומרת עברית, מסירה תווים אסורים). */

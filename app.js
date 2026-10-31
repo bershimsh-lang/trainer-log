@@ -4,7 +4,7 @@ import {
   todayISO, addDaysISO, dayName, formatDMY, formatDM, monthLabel, monthKeyOf, currentMonthKey, shiftMonth,
   endTimeFor, isValidTime, pad, timeRange, findConflict, validateWorkout, filterWorkouts, monthStats,
   buildProviderReport, buildAllReports, availableMonths, validateBackup, safeFileName, sortChrono, MONTHS,
-  buildWhatsAppText,
+  buildWhatsAppText, reminderDue, reminderTitle, todayLoggedText, DEFAULT_REMINDER, DAYS,
 } from './logic.js';
 import { reportToPdf, reportsToXlsx } from './reports.js';
 
@@ -175,7 +175,12 @@ function renderHome() {
   const pending = cache.meta.pendingReportMonth;
   const lastBackup = cache.meta.lastBackupAt;
   const needBackup = cache.workouts.length > 0 && (!lastBackup || Date.now() - new Date(lastBackup).getTime() > 30 * 864e5);
+  const remind = reminderDue(cache.meta);
   return `
+  ${remind ? `<div class="banner remind"><b>${esc(reminderTitle(trainerName()))}</b>
+    <div class="small muted" style="margin-top:4px">${esc(todayLoggedText(cache.workouts))}</div>
+    <div class="row"><button class="btn primary" data-act="remind-go">להוספת אימון</button>
+    <button class="btn ghost" data-act="remind-dismiss">הכול מעודכן ✓</button></div></div>` : ''}
   ${pending ? `<div class="banner"><b>חודש ${esc(monthLabel(pending))} הסתיים.</b> זה הזמן להפיק את הדוחות החודשיים לספקים.
     <div class="row"><button class="btn primary" data-act="pending-report">הפקת דוחות ${esc(monthLabel(pending))}</button>
     <button class="btn ghost" data-act="pending-dismiss">אחר כך</button></div></div>` : ''}
@@ -652,6 +657,81 @@ $('#modalRoot').addEventListener('input', (e) => {
   document.querySelectorAll('[data-wa=send],[data-wa=copy]').forEach((btn) => { btn.disabled = empty; });
 });
 
+// ---------- daily reminder ----------
+const remCfg = () => ({
+  enabled: cache.meta.reminderEnabled !== false,
+  time: cache.meta.reminderTime || DEFAULT_REMINDER.time,
+  days: cache.meta.reminderDays || DEFAULT_REMINDER.days,
+});
+const notifPerm = () => (typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+
+function renderReminderCard() {
+  const c = remCfg();
+  const perm = notifPerm();
+  return `<div class="card">
+    <h2>תזכורת יומית</h2>
+    <div class="seg" style="margin-bottom:12px">
+      <button class="chip ${c.enabled ? 'on' : ''}" data-act="rem-toggle" data-v="1">פעילה</button>
+      <button class="chip ${c.enabled ? '' : 'on'}" data-act="rem-toggle" data-v="0">כבויה</button>
+    </div>
+    ${c.enabled ? `
+    <div class="field"><label for="remTime">שעת התזכורת</label>
+      <input class="input" type="time" id="remTime" value="${c.time}" style="direction:ltr"></div>
+    <div class="field"><div class="label">ימים</div>
+      <div class="chips grid7">${['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'].map((d, i) => `<button class="chip ${c.days.includes(i) ? 'on' : ''}" data-act="rem-day" data-v="${i}" title="${DAYS[i]}">${d}</button>`).join('')}</div></div>
+    <div class="kv small"><span>התראות בטלפון</span><b id="remPerm">${perm === 'granted' ? 'מאושרות ✓' : perm === 'denied' ? 'חסומות' : perm === 'unsupported' ? 'לא נתמך במכשיר' : 'עדיין לא אושרו'}</b></div>
+    <div class="kv small"><span>בדיקה ברקע</span><b id="remBg">בודק…</b></div>
+    <div class="row wrap" style="margin-top:12px">
+      ${perm === 'default' ? '<button class="btn primary" data-act="rem-perm">הפעלת התראות</button>' : ''}
+      ${perm === 'granted' ? '<button class="btn" data-act="rem-test">שליחת התראת בדיקה</button>' : ''}
+    </div>
+    ${perm === 'denied' ? '<div class="hint">ההתראות נחסמו. כדי לאפשר: הגדרות הטלפון ← אפליקציות ← Chrome (או יומן אימונים) ← התראות.</div>' : ''}
+    <div class="hint">בכל יום פעיל, בשעה שנקבעה, תופיע התראה שתשאל אם הכנסת את כל האימונים של היום. מערכת אנדרואיד קובעת מתי בדיוק להעיר את האפליקציה, ולכן ההתראה עלולה להגיע באיחור. אם פותחים את האפליקציה אחרי השעה שנקבעה, התזכורת תופיע גם במסך הבית.</div>
+    ` : ''}
+  </div>`;
+}
+
+async function swReg() {
+  if (!('serviceWorker' in navigator)) return null;
+  try { return await navigator.serviceWorker.ready; } catch { return null; }
+}
+
+/** רישום להשכמה תקופתית ברקע (Chrome באנדרואיד, אפליקציה מותקנת בלבד). מחזיר טקסט סטטוס. */
+async function setupBackgroundReminder() {
+  const reg = await swReg();
+  if (!reg || !('periodicSync' in reg)) return 'לא נתמך במכשיר';
+  if (!remCfg().enabled) {
+    try { await reg.periodicSync.unregister('daily-reminder'); } catch { /* ignore */ }
+    return 'כבויה';
+  }
+  try {
+    const st = await navigator.permissions.query({ name: 'periodic-background-sync' });
+    if (st.state !== 'granted') return 'זמינה רק אחרי התקנה במסך הבית';
+    await reg.periodicSync.register('daily-reminder', { minInterval: 60 * 60 * 1000 });
+    return 'פעילה ✓';
+  } catch { return 'לא זמינה'; }
+}
+
+async function refreshReminderStatus() {
+  const el = $('#remBg');
+  if (el) el.textContent = await setupBackgroundReminder();
+}
+
+/** נקרא כל דקה: באפליקציה פתוחה – באנר; כשהיא ברקע – התראת מערכת. */
+async function checkReminder() {
+  if (!reminderDue(cache.meta)) return;
+  if (document.hidden) {
+    if (notifPerm() === 'granted') (await swReg())?.active?.postMessage({ type: 'check-reminder' });
+  } else if (state.view === 'home' && !$('.banner.remind')) render();
+}
+
+navigator.serviceWorker?.addEventListener('message', async (e) => {
+  if (e.data?.type === 'go') {
+    await DB.setMeta('lastReminderDate', todayISO());
+    go(e.data.view);
+  }
+});
+
 // ---------- manage ----------
 function renderManage() {
   const provs = [...cache.providers].sort((a, b) => (b.is_active - a.is_active) || a.created_at.localeCompare(b.created_at));
@@ -693,6 +773,8 @@ function renderManage() {
       <div class="inline-add" style="margin:0"><input class="input" id="sName" value="${esc(trainerName())}"><button class="btn primary" data-act="save-name">שמירה</button></div></div>
   </div>
 
+  ${renderReminderCard()}
+
   <div class="card">
     <h2>גיבוי ושחזור</h2>
     <p class="small muted" style="margin-top:0">הנתונים שמורים בטלפון בלבד. מומלץ לשמור גיבוי פעם בחודש (לדוגמה, לשלוח לעצמך במייל או לשמור ב-Drive).</p>
@@ -708,7 +790,7 @@ function renderManage() {
   <div class="center small muted" style="padding:6px 0 20px">יומן אימונים · גרסה ${APP_VERSION}</div>`;
 }
 
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.3.1';
 
 async function doBackup() {
   const data = DB.exportData();
@@ -841,6 +923,29 @@ document.addEventListener('click', async (e) => {
     case 'm-rename-t': { const t = typeById(v); const n = await promptModal('עריכת שם סוג אימון', t.name); if (n) { try { await DB.updateType(v, { name: n }); toast('השם עודכן'); } catch (err) { toast(err.message, 'err'); } rerender(); } return; }
     case 'm-toggle-t': { const t = typeById(v); await DB.updateType(v, { is_active: !t.is_active }); toast(t.is_active ? 'סוג האימון הושבת' : 'סוג האימון הופעל'); return rerender(); }
     case 'm-del-t': { const t = typeById(v); if (await confirmModal('מחיקת סוג אימון', `למחוק את <b>${esc(t.name)}</b>?`, 'מחיקה', true)) { try { await DB.deleteType(v); toast('סוג האימון נמחק'); } catch (err) { toast(err.message, 'err'); } rerender(); } return; }
+    case 'remind-go': await DB.setMeta('lastReminderDate', todayISO()); return go('add');
+    case 'remind-dismiss': await DB.setMeta('lastReminderDate', todayISO()); return rerender();
+    case 'rem-toggle': await DB.setMeta('reminderEnabled', v === '1'); rerender(); return refreshReminderStatus();
+    case 'rem-day': {
+      const days = new Set(remCfg().days);
+      const d = Number(v);
+      if (days.has(d)) days.delete(d); else days.add(d);
+      await DB.setMeta('reminderDays', [...days].sort());
+      return rerender();
+    }
+    case 'rem-perm': {
+      try { await Notification.requestPermission(); } catch { /* ignore */ }
+      rerender();
+      await refreshReminderStatus();
+      if (notifPerm() === 'granted') toast('ההתראות הופעלו ✓');
+      return;
+    }
+    case 'rem-test': {
+      const reg = await swReg();
+      reg?.active?.postMessage({ type: 'test-reminder' });
+      toast('נשלחה התראת בדיקה');
+      return;
+    }
     case 'save-name': await DB.setMeta('trainerName', $('#sName').value.trim()); toast('השם נשמר'); return rerender();
     default:
   }
@@ -856,6 +961,7 @@ document.addEventListener('change', (e) => {
   if (id === 'flType') { state.filters.typeId = e.target.value; render(); }
   if (id === 'repMonth') { state.reportMonth = e.target.value; state.openReport = null; render(); }
   if (id === 'restoreFile' && e.target.files[0]) doRestore(e.target.files[0]);
+  if (id === 'remTime' && e.target.value) DB.setMeta('reminderTime', e.target.value).then(() => toast(`התזכורת תופיע ב-${e.target.value}`));
 });
 
 document.addEventListener('input', (e) => {
@@ -908,7 +1014,7 @@ async function showPersistState() {
     el.textContent = p ? 'פעיל ✓' : 'לא אושר (מומלץ להתקין את האפליקציה במסך הבית)';
   } catch { el.textContent = 'לא ידוע'; }
 }
-new MutationObserver(showPersistState).observe(main, { childList: true });
+new MutationObserver(() => { showPersistState(); refreshReminderStatus(); }).observe(main, { childList: true });
 
 // ---------- boot ----------
 (async function boot() {
@@ -920,14 +1026,15 @@ new MutationObserver(showPersistState).observe(main, { childList: true });
   }
   await checkMonth();
   route();
-  setInterval(checkMonth, 60_000);
+  setInterval(() => { checkMonth(); checkReminder(); }, 60_000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkReminder(); });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       // גרסה חדשה הותקנה – טעינה מחדש פעם אחת כדי להציג אותה
       if (hadController && !sessionStorage.getItem('reloaded')) { sessionStorage.setItem('reloaded', '1'); location.reload(); }
     });
-    navigator.serviceWorker.register('sw.js').then((reg) => reg.update()).catch(() => {});
+    navigator.serviceWorker.register('sw.js').then((reg) => reg.update()).then(() => setupBackgroundReminder()).catch(() => {});
   }
 }());
 
