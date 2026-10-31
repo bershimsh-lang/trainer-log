@@ -307,14 +307,22 @@ export function substitutionLines(subWorkouts) {
   });
 }
 
+// קו מפריד קצר מספיק כדי לא לשבור שורה בבועת וואטסאפ בטלפון צר
+export const WA_SEPARATOR = '━'.repeat(12);
+
+const totalPhrase = (n) => (n === 1 ? 'שיעור אחד' : `${n} שיעורים`);
+
 /**
  * בונה הודעת טקסט לוואטסאפ.
  * selections: [{ providerId, typeIds: [...] }] – רק סוגי האימונים שנבחרו נכללים.
- * אימונים אישיים מפורטים לפי סוג ותאריך; "סה"כ" סופר רק אימונים אישיים; החלפות מסוכמות בסוף.
+ * לכל סוג: פירוט לפי תאריך + סה"כ מודגש. החלפות כהערות (*) אחרי הספק. בסוף – סיכום כללי.
+ * שימוש בסימוני וואטסאפ: *טקסט* = מודגש.
  */
 export function buildWhatsAppText({ providers, types, workouts }, month, selections) {
   const [y, m] = month.split('-');
   const out = [`פירוט שיעורים לחודש ${MONTHS[Number(m) - 1]} ${y.slice(2)}`];
+  let totalSelf = 0;
+  let totalSubs = 0;
   for (const sel of selections) {
     const provider = providers.find((p) => p.id === sel.providerId);
     if (!provider) continue;
@@ -323,6 +331,8 @@ export function buildWhatsAppText({ providers, types, workouts }, month, selecti
     if (ws.length === 0) continue;
     const self = ws.filter((w) => w.performed_by === 'self');
     const subs = ws.filter((w) => w.performed_by === 'substitute');
+    totalSelf += self.length;
+    totalSubs += subs.length;
 
     out.push('', `*${provider.name}*`);
     // סדר הסוגים לפי הופעה ראשונה בחודש
@@ -330,14 +340,17 @@ export function buildWhatsAppText({ providers, types, workouts }, month, selecti
     for (const tid of typeOrder) {
       const name = types.find((t) => t.id === tid)?.name ?? 'אחר';
       const perDate = new Map();
-      for (const w of self.filter((x) => x.workout_type_id === tid)) perDate.set(w.workout_date, (perDate.get(w.workout_date) || 0) + 1);
+      const ofType = self.filter((x) => x.workout_type_id === tid);
+      for (const w of ofType) perDate.set(w.workout_date, (perDate.get(w.workout_date) || 0) + 1);
       out.push('', `${name}:`);
       for (const [date, n] of perDate) out.push(`${shortDate(date)} ${lessonsPhrase(n)}`);
+      out.push(`*סה"כ ${name}: ${totalPhrase(ofType.length)}*`);
     }
-    out.push('', `סה"כ: ${self.length === 1 ? 'שיעור אחד' : `${self.length} שיעורים`}`);
+    if (typeOrder.length > 1) out.push('', `*סה"כ ${provider.name}: ${totalPhrase(self.length)}*`);
     const lines = substitutionLines(subs);
-    if (lines.length) out.push(...lines);
+    if (lines.length) out.push('', ...lines.map((l) => `*${l}`));
   }
+  out.push('', WA_SEPARATOR, '*סיכום:*', `סה"כ שיעורים שלי: *${totalSelf}*`, `סה"כ שיעורי מחליפות: *${totalSubs}*`);
   return out.join('\n');
 }
 

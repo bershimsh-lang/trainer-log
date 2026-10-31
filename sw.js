@@ -1,6 +1,6 @@
 // Service Worker: שומר את קובצי האפליקציה במטמון כך שהיא עובדת גם ללא אינטרנט.
 // בכל עדכון גרסה יש לשנות את VERSION כדי שהטלפון יוריד את הקבצים החדשים.
-const VERSION = 'trainer-log-v1.1.0';
+const VERSION = 'trainer-log-v1.1.1';
 const ASSETS = [
   './',
   'index.html',

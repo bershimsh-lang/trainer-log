@@ -708,7 +708,7 @@ function renderManage() {
   <div class="center small muted" style="padding:6px 0 20px">יומן אימונים · גרסה ${APP_VERSION}</div>`;
 }
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 
 async function doBackup() {
   const data = DB.exportData();
