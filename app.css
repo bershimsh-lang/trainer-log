@@ -215,3 +215,14 @@ main { max-width: 640px; margin: 0 auto; padding: 14px 14px 0; }
 .toast.err { background: var(--danger); }
 
 .empty { text-align: center; color: var(--muted); padding: 26px 8px; }
+
+/* ---------- WhatsApp ---------- */
+.btn.wa { background: #1fa855; color: #fff; display: inline-flex; align-items: center; gap: 6px; }
+.wa-ico { width: 20px; height: 20px; vertical-align: -4px; flex: none; }
+.modal h3 .wa-ico { color: #1fa855; width: 24px; height: 24px; }
+.wa-prov { border: 1.5px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-bottom: 8px; }
+.wa-prov.on { border-color: #1fa855; background: #f2fbf5; }
+.wa-check { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; font-weight: 800; font-size: 16px; padding: 4px 0; text-align: start; }
+.wa-check .box { width: 24px; height: 24px; border-radius: 7px; border: 2px solid #9ca3af; display: grid; place-items: center; color: #fff; font-size: 15px; }
+.wa-prov.on .wa-check .box { background: #1fa855; border-color: #1fa855; }
+.wa-text { font-family: inherit; min-height: 220px; font-size: 15px; line-height: 1.5; resize: vertical; white-space: pre-wrap; }

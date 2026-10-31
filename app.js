@@ -4,6 +4,7 @@ import {
   todayISO, addDaysISO, dayName, formatDMY, formatDM, monthLabel, monthKeyOf, currentMonthKey, shiftMonth,
   endTimeFor, isValidTime, pad, timeRange, findConflict, validateWorkout, filterWorkouts, monthStats,
   buildProviderReport, buildAllReports, availableMonths, validateBackup, safeFileName, sortChrono, MONTHS,
+  buildWhatsAppText,
 } from './logic.js';
 import { reportToPdf, reportsToXlsx } from './reports.js';
 
@@ -479,6 +480,7 @@ function renderReports() {
       <div class="row wrap">
         <button class="btn primary" data-act="xlsx">Excel מרוכז לכל הספקים</button>
         <button class="btn" data-act="pdf-all">כל קובצי ה-PDF</button>
+        <button class="btn wa" data-act="wa-open" data-v="">${WA_ICON} שליחה בוואטסאפ</button>
       </div>
       <div class="hint">${canShare ? 'הקבצים ייפתחו לשיתוף (וואטסאפ, מייל, שמירה לקבצים).' : 'הקבצים יורדו למכשיר.'}</div>` : ''}
   </div>
@@ -489,6 +491,7 @@ function renderReports() {
         <span class="badge off">סה"כ ${r.totals.all} אימונים · ${r.totals.allHours} שעות</span></div>
       <div class="row wrap">
         <button class="btn primary" data-act="pdf" data-v="${r.provider.id}">PDF</button>
+        <button class="btn wa" data-act="wa-open" data-v="${r.provider.id}">${WA_ICON} וואטסאפ</button>
         <button class="btn" data-act="toggle-rep" data-v="${r.provider.id}">${state.openReport === r.provider.id ? 'הסתרת פירוט' : 'הצגת פירוט'}</button>
       </div>
       ${state.openReport === r.provider.id ? reportTableHtml(r) : ''}
@@ -527,6 +530,127 @@ async function withBusy(label, fn) {
   await new Promise((r) => setTimeout(r, 30));
   try { await fn(); } catch (e) { console.error(e); toast(`שגיאה: ${e.message}`, 'err'); }
 }
+
+// ---------- WhatsApp ----------
+const WA_ICON = '<svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM6.6 11a1.4 1.4 0 1 0 2.8 0a1.4 1.4 0 1 0 -2.8 0zM10.6 11a1.4 1.4 0 1 0 2.8 0a1.4 1.4 0 1 0 -2.8 0zM14.6 11a1.4 1.4 0 1 0 2.8 0a1.4 1.4 0 1 0 -2.8 0z"/></svg>';
+
+const wa = { month: null, selected: new Map(), text: '', edited: false };
+
+function waProviders() {
+  return buildAllReports(reportData(), wa.month).map((r) => providerById(r.provider.id)).filter(Boolean);
+}
+
+/** סוגי אימונים שיש להם אימונים אצל הספק בחודש הנבחר */
+function waTypesFor(pid) {
+  const ids = new Set(cache.workouts.filter((w) => w.provider_id === pid && monthKeyOf(w.workout_date) === wa.month).map((w) => w.workout_type_id));
+  return cache.workoutTypes.filter((t) => ids.has(t.id)).sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
+function waBuildText() {
+  const selections = waProviders().filter((p) => wa.selected.has(p.id) && wa.selected.get(p.id).size)
+    .map((p) => ({ providerId: p.id, typeIds: [...wa.selected.get(p.id)] }));
+  return selections.length ? buildWhatsAppText(reportData(), wa.month, selections) : '';
+}
+
+function renderWaModal() {
+  const provs = waProviders();
+  if (!wa.edited) wa.text = waBuildText();
+  return `<div class="modal-back" id="waBack"><div class="modal" role="dialog" aria-modal="true">
+    <h3>${WA_ICON} שליחת פירוט בוואטסאפ</h3>
+    <div class="muted small" style="margin-bottom:10px">${esc(monthLabel(wa.month))} · בחרי ספקים וסוגי אימונים</div>
+    ${provs.map((p) => {
+      const on = wa.selected.has(p.id);
+      const types = waTypesFor(p.id);
+      const sel = wa.selected.get(p.id);
+      return `<div class="wa-prov ${on ? 'on' : ''}">
+        <button type="button" class="wa-check" data-wa="prov" data-v="${p.id}"><span class="box">${on ? '✓' : ''}</span>${esc(p.name)}</button>
+        ${on ? `<div class="chips" style="margin-top:8px">
+          <button type="button" class="chip ${sel.size === types.length ? 'on' : ''}" data-wa="all" data-v="${p.id}">כל הסוגים</button>
+          ${types.map((t) => `<button type="button" class="chip ${sel.has(t.id) ? 'on' : ''}" data-wa="type" data-p="${p.id}" data-v="${t.id}">${esc(t.name)}</button>`).join('')}
+        </div>` : ''}
+      </div>`;
+    }).join('')}
+    <div class="row" style="margin:14px 0 6px"><b class="spacer">תצוגה מקדימה</b>
+      ${wa.edited ? '<button type="button" class="btn ghost" data-wa="reset">שחזור הטקסט האוטומטי</button>' : '<span class="muted small">אפשר לערוך לפני השליחה</span>'}</div>
+    <textarea class="input wa-text" id="waText" dir="rtl">${esc(wa.text)}</textarea>
+    <div class="actions">
+      <button type="button" class="btn wa" data-wa="send" ${wa.text.trim() ? '' : 'disabled'}>${WA_ICON} פתיחה בוואטסאפ</button>
+      <button type="button" class="btn" data-wa="copy" ${wa.text.trim() ? '' : 'disabled'}>העתקה</button>
+      <button type="button" class="btn" data-wa="close">סגירה</button>
+    </div>
+    <div class="hint">בוואטסאפ תבחרי את איש הקשר שאליו נשלחת ההודעה.</div>
+  </div></div>`;
+}
+
+function waRender() {
+  const root = $('#modalRoot');
+  const scroll = root.querySelector('.modal')?.scrollTop || 0;
+  root.innerHTML = renderWaModal();
+  root.querySelector('.modal').scrollTop = scroll;
+}
+
+function openWhatsAppComposer(providerId) {
+  wa.month = state.reportMonth;
+  wa.selected = new Map();
+  wa.edited = false;
+  const provs = waProviders();
+  const initial = providerId ? provs.filter((p) => p.id === providerId) : provs;
+  for (const p of initial) wa.selected.set(p.id, new Set(waTypesFor(p.id).map((t) => t.id)));
+  waRender();
+}
+
+$('#modalRoot').addEventListener('click', async (e) => {
+  if (!$('#waBack')) return;
+  if (e.target.id === 'waBack') { $('#modalRoot').innerHTML = ''; return; }
+  const b = e.target.closest('[data-wa]');
+  if (!b) return;
+  const { v } = b.dataset;
+  switch (b.dataset.wa) {
+    case 'prov':
+      if (wa.selected.has(v)) wa.selected.delete(v); else wa.selected.set(v, new Set(waTypesFor(v).map((t) => t.id)));
+      wa.edited = false; return waRender();
+    case 'all': {
+      const all = waTypesFor(v).map((t) => t.id);
+      const cur = wa.selected.get(v);
+      wa.selected.set(v, cur.size === all.length ? new Set() : new Set(all));
+      wa.edited = false; return waRender();
+    }
+    case 'type': {
+      const set = wa.selected.get(b.dataset.p);
+      if (set.has(v)) set.delete(v); else set.add(v);
+      wa.edited = false; return waRender();
+    }
+    case 'reset': wa.edited = false; return waRender();
+    case 'copy':
+      try { await navigator.clipboard.writeText(wa.text); toast('הטקסט הועתק ✓'); } catch { toast('לא ניתן להעתיק – סמני את הטקסט והעתיקי ידנית', 'err'); }
+      return;
+    case 'send': {
+      const a = document.createElement('a');
+      a.href = `https://wa.me/?text=${encodeURIComponent(wa.text)}`;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+    case 'close': $('#modalRoot').innerHTML = ''; return;
+    default:
+  }
+});
+
+$('#modalRoot').addEventListener('input', (e) => {
+  if (e.target.id !== 'waText') return;
+  wa.text = e.target.value;
+  if (!wa.edited) {
+    wa.edited = true;
+    // מציג את כפתור "שחזור" בלי לאבד פוקוס בשדה
+    const hint = e.target.previousElementSibling.querySelector('.muted');
+    if (hint) hint.outerHTML = '<button type="button" class="btn ghost" data-wa="reset">שחזור הטקסט האוטומטי</button>';
+  }
+  const empty = !wa.text.trim();
+  document.querySelectorAll('[data-wa=send],[data-wa=copy]').forEach((btn) => { btn.disabled = empty; });
+});
 
 // ---------- manage ----------
 function renderManage() {
@@ -584,7 +708,7 @@ function renderManage() {
   <div class="center small muted" style="padding:6px 0 20px">יומן אימונים · גרסה ${APP_VERSION}</div>`;
 }
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 
 async function doBackup() {
   const data = DB.exportData();
@@ -699,6 +823,7 @@ document.addEventListener('click', async (e) => {
       const reports = buildAllReports(reportData(), state.reportMonth);
       await deliverFiles(reports.map((r) => ({ name: pdfName(r), type: 'application/pdf', data: reportToPdf(r, { trainerName: trainerName() }) })));
     });
+    case 'wa-open': return openWhatsAppComposer(v);
     case 'xlsx': return withBusy('מפיק Excel…', async () => {
       const m = state.reportMonth;
       const reports = buildAllReports(reportData(), m);
@@ -797,7 +922,12 @@ new MutationObserver(showPersistState).observe(main, { childList: true });
   route();
   setInterval(checkMonth, 60_000);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      // גרסה חדשה הותקנה – טעינה מחדש פעם אחת כדי להציג אותה
+      if (hadController && !sessionStorage.getItem('reloaded')) { sessionStorage.setItem('reloaded', '1'); location.reload(); }
+    });
+    navigator.serviceWorker.register('sw.js').then((reg) => reg.update()).catch(() => {});
   }
 }());
 

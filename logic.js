@@ -252,5 +252,94 @@ export function validateBackup(obj) {
   return { providers, workoutTypes, workouts, meta: obj.data.meta || {} };
 }
 
+// ---------- הודעת וואטסאפ ----------
+const COUNT_WORDS = ['', 'אחד', 'שני', 'שלושה', 'ארבעה', 'חמישה', 'שישה', 'שבעה', 'שמונה', 'תשעה', 'עשרה'];
+
+/** "שיעור אחד", "שני שיעורים", "12 שיעורים" */
+export function lessonsPhrase(n) {
+  if (n === 1) return 'שיעור אחד';
+  if (n <= 10) return `${COUNT_WORDS[n]} שיעורים`;
+  return `${n} שיעורים`;
+}
+
+/** "בשיעור אחד", "בשני שיעורים", "ב-12 שיעורים" */
+export function inLessonsPhrase(n) {
+  return n <= 10 ? `ב${lessonsPhrase(n)}` : `ב-${n} שיעורים`;
+}
+
+/** 2026-08-05 → "5.8" */
+export const shortDate = (iso) => `${Number(iso.slice(8, 10))}.${Number(iso.slice(5, 7))}`;
+
+/** "ב-5.8", "ב-5.8 וב-12.8", "ב-5.8, ב-12.8 וב-26.8" */
+function datesPhrase(dates) {
+  const parts = dates.map((d) => `ב-${shortDate(d)}`);
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')} ו${parts[parts.length - 1]}`;
+}
+
+function joinHebrewList(items) {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} ו${items[items.length - 1]}`;
+}
+
+/** משפטי החלפות: מאחד תאריכים שבהם בדיוק אותן מחליפות ואותן כמויות. */
+export function substitutionLines(subWorkouts) {
+  const byDate = new Map();
+  for (const w of sortChrono(subWorkouts)) {
+    const m = byDate.get(w.workout_date) || new Map();
+    const name = (w.substitute_name || '').trim();
+    m.set(name, (m.get(name) || 0) + 1);
+    byDate.set(w.workout_date, m);
+  }
+  const groups = new Map(); // חתימה → { dates, parts }
+  for (const [date, m] of byDate) {
+    const parts = [...m.entries()].map(([name, count]) => ({ name, count }));
+    const sig = parts.map((p) => `${p.name}:${p.count}`).join('|');
+    const g = groups.get(sig) || { dates: [], parts };
+    g.dates.push(date);
+    groups.set(sig, g);
+  }
+  return [...groups.values()].map(({ dates, parts }) => {
+    const [first, ...rest] = parts;
+    const head = `${first.name} החליפה אותי ${inLessonsPhrase(first.count)}`;
+    const tail = rest.map((p) => `${p.name} ${inLessonsPhrase(p.count)}`);
+    return `${datesPhrase(dates)} ${joinHebrewList([head, ...tail])}`;
+  });
+}
+
+/**
+ * בונה הודעת טקסט לוואטסאפ.
+ * selections: [{ providerId, typeIds: [...] }] – רק סוגי האימונים שנבחרו נכללים.
+ * אימונים אישיים מפורטים לפי סוג ותאריך; "סה"כ" סופר רק אימונים אישיים; החלפות מסוכמות בסוף.
+ */
+export function buildWhatsAppText({ providers, types, workouts }, month, selections) {
+  const [y, m] = month.split('-');
+  const out = [`פירוט שיעורים לחודש ${MONTHS[Number(m) - 1]} ${y.slice(2)}`];
+  for (const sel of selections) {
+    const provider = providers.find((p) => p.id === sel.providerId);
+    if (!provider) continue;
+    const typeSet = new Set(sel.typeIds);
+    const ws = filterWorkouts(workouts, { month, providerId: provider.id }).filter((w) => typeSet.has(w.workout_type_id));
+    if (ws.length === 0) continue;
+    const self = ws.filter((w) => w.performed_by === 'self');
+    const subs = ws.filter((w) => w.performed_by === 'substitute');
+
+    out.push('', `*${provider.name}*`);
+    // סדר הסוגים לפי הופעה ראשונה בחודש
+    const typeOrder = [...new Set(self.map((w) => w.workout_type_id))];
+    for (const tid of typeOrder) {
+      const name = types.find((t) => t.id === tid)?.name ?? 'אחר';
+      const perDate = new Map();
+      for (const w of self.filter((x) => x.workout_type_id === tid)) perDate.set(w.workout_date, (perDate.get(w.workout_date) || 0) + 1);
+      out.push('', `${name}:`);
+      for (const [date, n] of perDate) out.push(`${shortDate(date)} ${lessonsPhrase(n)}`);
+    }
+    out.push('', `סה"כ: ${self.length === 1 ? 'שיעור אחד' : `${self.length} שיעורים`}`);
+    const lines = substitutionLines(subs);
+    if (lines.length) out.push(...lines);
+  }
+  return out.join('\n');
+}
+
 /** תיבת שם קובץ בטוחה (שומרת עברית, מסירה תווים אסורים). */
 export const safeFileName = (s) => s.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
